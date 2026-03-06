@@ -1,8 +1,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
-/// 应用配置
+/// app config struct
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     /// LLM API key
@@ -28,26 +28,31 @@ impl Default for AppConfig {
     
 }
 
-/// 获取配置文件路径：~/.config/shellm/config.json
+/// get config file path
 pub fn config_path() -> Result<PathBuf> {
     let dirs = directories::ProjectDirs::from("com", "shellm", "shellm")
-        .ok_or_else(|| anyhow::anyhow!("无法确定配置目录"))?;
+        .ok_or_else(|| anyhow::anyhow!("Unable to determine config directory"))?;
     Ok(dirs.config_dir().join("config.json"))
 }
 
-/// 加载配置文件，不存在则返回默认值
+/// load config from file, if not exist return default config
 pub fn load_config() -> Result<AppConfig> {
     let path = config_path()?;
     if !path.exists() {
         return Ok(AppConfig::default());
     }
-    // TODO: 读取并反序列化配置文件
-    todo!("实现配置文件加载")
+    let content = fs::read_to_string(&path)?;
+    let cfg: AppConfig = serde_json::from_str(&content)?;
+    Ok(cfg)
 }
 
-/// 保存配置到文件
+/// save config to file
 pub fn save_config(cfg: &AppConfig) -> Result<()> {
     let path = config_path()?;
-    // TODO: 序列化并写入配置文件（确保目录存在）
-    todo!("实现配置文件保存")
+    let json = serde_json::to_string_pretty(cfg)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, json)?;
+    Ok(())
 }
