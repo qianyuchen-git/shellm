@@ -10,27 +10,36 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// 用自然语言描述你想做的事，AI 生成对应的 shell 命令
+    /// Ask AI a natural language question and get a shell command as answer
     Ask {
-        /// 自然语言描述，例如 "查找当前目录下所有大于 10MB 的文件"
+        /// natural language query, e.g. "find all .rs files modified in the last 7 days"
         query: String,
     },
 
-    /// 解释一条 shell 命令的含义
+    /// Explain a shell command
     Explain {
-        /// 要解释的命令，例如 "find . -name '*.rs' -mtime -7"
+        /// command need to explain, e.g. "ls -la"
         command: String,
     },
 
-    /// 让 AI 审查一个代码文件
+    /// let AI review your shell script and provide feedback
     Review {
-        /// 文件路径
+        /// file path
         path: String,
     },
 
-    /// 管理配置（API key 等）
+    /// manage configuration (API key, model, etc.)
     Config {
-        /// 操作：set-key, show
-        action: String,
+        #[command(subcommand)]
+        action: ConfigAction,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConfigAction {
+    SetKey,
+    SetModel { model: String },
+    SetUrl { url: String },
+    Show,
+    Reset,
 }
