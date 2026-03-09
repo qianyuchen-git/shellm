@@ -1,18 +1,38 @@
 use anyhow::Result;
-use crate::config::AppConfig;
+use crate::{ai::client, config::AppConfig};
+use reqwest::Client;
 
-/// 调用 LLM API 并返回文本响应
-///
-/// 思路：
-/// 1. 从 config 中获取 api_key, api_base, model
-/// 2. 用 reqwest 发送 POST 请求到 /v1/chat/completions（OpenAI 兼容接口）
-/// 3. 解析 JSON 响应，提取 assistant message content
+/// post messages to AI and get response
 pub async fn chat(cfg: &AppConfig, messages: &[Message]) -> Result<String> {
-    // TODO: 构造请求体，发送 HTTP 请求，解析响应
-    todo!("实现 LLM API 调用")
+    let client = Client::new();
+    let request_body = serde_json::json!({
+        "model": cfg.model.as_deref().unwrap_or("gpt-3.5-turbo"),
+        "messages": messages.iter().map(|m| {
+            let role = match m.role {
+                Role::System => "system",
+                Role::User => "user",
+            };
+            serde_json::json!({
+                "role": role,
+                "content": m.content,
+            })
+        }).collect::<Vec<_>>(),
+    });
+    let response = client.post(format!("{}/v1/chat/completions", cfg.api_base.as_deref().unwrap_or("https://api.openai.com")))
+        .bearer_auth(cfg.api_key.as_deref().ok_or_else(|| anyhow::anyhow!("API key not set"))?)
+        .json(&request_body)
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<serde_json::Value>()
+        .await?;
+    let content = response["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid response format: missing content"))?;
+    Ok(content.to_string())
 }
 
-/// 聊天消息
+/// Chat message
 #[derive(Debug, Clone)]
 pub struct Message {
     pub role: Role,
