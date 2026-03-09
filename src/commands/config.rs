@@ -3,40 +3,63 @@ use crate::config::{ AppConfig, load_config, config_path, save_config };
 
 use crate::cli::ConfigAction;
 
-/// `shellm config set-key` 或 `shellm config show`
-///
-/// 流程：
-/// - set-key: 交互式输入 API key，保存到配置文件
-/// - show: 打印当前配置（API key 部分脱敏）
+/// Execute config subcommands
+/// - set-key: interactively input API key and save
+/// - show: print current config (API key partially masked)
+/// - set-model: set the model name
+/// - set-url: set the API base URL
+/// - reset: reset config to defaults
 pub fn run(action: &ConfigAction) -> Result<()> {
     match action {
         ConfigAction::SetKey => {
-            // TODO: 用 dialoguer 读取 API key，调用 config::save_config()
-            todo!("实现 set-key")
+            println!("Enter your API key:");
+            let mut api_key = String::new();
+            std::io::stdin().read_line(&mut api_key)?;
+            let api_key = api_key.trim().to_string();
+            let mut cfg = load_config()?;
+            cfg.api_key = Some(api_key);
+            save_config(&cfg)?;
+            println!("API key saved successfully");
+            Ok(())
         }
         ConfigAction::Show => {
             load_config().map(|cfg| {
-                println!("当前配置:");
-                println!("API Key: {}", "");
-                println!("模型: {}", cfg.model.unwrap_or_default());
-                println!("URL: {}", cfg.api_base.unwrap_or_default());
+                println!("Current config:");
+                println!("API Key: {}", cfg.api_key.as_ref().map(|k| {
+                    if k.len() <= 4 {
+                        "*".repeat(k.len())
+                    } else {
+                        format!("{}{}", "*".repeat(k.len() - 4), &k[k.len() - 4..])
+                    }
+                }).unwrap_or_else(|| "Not set".to_string()));
+                println!("Model: {}", cfg.model.as_deref().unwrap_or("Not set"));
+                println!("URL: {}", cfg.api_base.as_deref().unwrap_or("Not set"));
+                println!("Language: {}", cfg.language.as_deref().unwrap_or("Not set"));
             })?;
             Ok(())
         }
         ConfigAction::SetModel { model } => {
-            // TODO: 设置模型
-            todo!("实现 set-model")
+            let mut cfg = load_config()?;
+            cfg.model = Some(model.clone());
+            save_config(&cfg)?;
+            println!("Model set to {}", model);
+            Ok(())
         }
         ConfigAction::SetUrl { url } => {
-            // TODO: 设置 URL
-            todo!("实现 set-url")
+            let mut cfg = load_config()?;
+            cfg.api_base = Some(url.clone());
+            save_config(&cfg)?;
+            println!("API base URL set to {}", url);
+            Ok(())
         }
         ConfigAction::Reset => {
-            // TODO: 重置配置
-            todo!("实现 reset")
+            let cfg = AppConfig::default();
+            save_config(&cfg)?;
+            println!("Config reset to defaults");
+            Ok(())
         }
         _ => {
-            anyhow::bail!("未知操作: {}，可用操作: set-key, show", action);
+            anyhow::bail!("Unknown action: {:?}，available actions: set-key, show, set-model, set-url, reset", action);
         }
     }
 }
