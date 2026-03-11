@@ -1,9 +1,9 @@
+mod ai;
 mod cli;
 mod commands;
-mod ai;
 mod config;
-mod output;
 mod error;
+mod output;
 
 use anyhow::Result;
 use clap::Parser;
@@ -17,8 +17,8 @@ async fn main() -> Result<()> {
     let cfg = config::load_config()?;
 
     match cli.command {
-        Commands::Ask { query } => {
-            commands::ask::run(&cfg, &query).await?;
+        Commands::Execute { query } => {
+            commands::execute::run(&cfg, &query).await?;
         }
         Commands::Explain { command } => {
             commands::explain::run(&cfg, &command).await?;

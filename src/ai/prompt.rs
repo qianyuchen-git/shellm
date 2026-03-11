@@ -5,15 +5,15 @@ fn system_info() -> String {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
     let shell = if cfg!(target_os = "windows") {
-        "PowerShell"
+        "cmd"
     } else {
         "Bash"
     };
     format!("The user is running on {os} ({arch}) with {shell}.")
 }
 
-/// ask command system prompt
-pub fn ask_system_prompt() -> String {
+/// execute command system prompt
+pub fn execute_system_prompt() -> String {
     format!("You are a helpful assistant that generates shell commands based on user queries.
 {system_info}
 Generate commands that work on the user's operating system and shell.

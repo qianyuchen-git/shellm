@@ -11,7 +11,7 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Ask AI a natural language question and get a shell command as answer
-    Ask {
+    Execute {
         /// natural language query, e.g. "find all .rs files modified in the last 7 days"
         query: String,
     },
