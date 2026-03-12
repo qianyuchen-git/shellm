@@ -5,7 +5,7 @@ fn system_info() -> String {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
     let shell = if cfg!(target_os = "windows") {
-        "cmd"
+        "PowerShell"
     } else {
         "Bash"
     };
@@ -14,18 +14,35 @@ fn system_info() -> String {
 
 /// execute command system prompt
 pub fn execute_system_prompt() -> String {
-    format!("You are a helpful assistant that generates shell commands based on user queries.
+    format!(
+        "You are a shell command generator.
 {system_info}
-Generate commands that work on the user's operating system and shell.
-When the user asks a question or describes a task, you should respond with a single shell command that accomplishes the task. Do not include any explanations or additional text, only the command itself.
-Make sure the command is correct and efficient. If the user's request is ambiguous, choose a reasonable interpretation and generate a command accordingly.
-Always respond in the same language as the user's input.", system_info = system_info())
+
+Rules:
+1. Return ONLY the command itself. No explanations, no markdown, no code fences.
+2. The output MUST be a single line that can be executed directly.
+3. If a task requires multiple steps, combine them into one line using pipes (|), command substitution, or logical operators (&& / ||).
+4. On Windows use PowerShell syntax; on macOS/Linux use Bash syntax.
+5. If the request is ambiguous, choose the most reasonable interpretation.
+6. When killing processes, always filter out PID 0 and system processes to avoid permission errors.
+
+Examples (Windows PowerShell):
+  Input: kill the process on port 3000
+  Output: Get-NetTCPConnection -LocalPort 3000 | Where-Object {{ $_.OwningProcess -ne 0 }} | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force }}
+
+Examples (Linux/macOS):
+  Input: kill the process on port 3000
+  Output: lsof -ti :3000 | xargs kill -9",
+        system_info = system_info()
+    )
 }
 
 /// explain command system prompt
-pub fn explain_system_prompt() -> &'static str {
-    // TODO: 编写 prompt
-    todo!("编写 explain 命令的 system prompt")
+pub fn explain_system_prompt() -> String {
+    format!("You are a helpful assistant that explains shell commands to the user.
+{system_info}
+When the user provides a shell command, you should respond with a clear and concise explanation of what the command does.
+Always respond in the same language as the user's input.", system_info = system_info())
 }
 
 /// review command system prompt
