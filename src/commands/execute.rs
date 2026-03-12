@@ -8,18 +8,28 @@ pub async fn run(cfg: &AppConfig, query: &str) -> Result<()> {
         crate::ai::client::Message::user(query.to_string()),
     ];
     let command = crate::ai::client::chat(cfg, &messages).await?;
-    // Windows 用 cmd，macOS/Linux 统一用 sh
+
+    println!("📋 Executing: {}\n", command);
+
     #[cfg(target_os = "windows")]
-    let status = std::process::Command::new("cmd")
-        .args(["/C", &command])
+    let status = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            &format!("$ErrorActionPreference='SilentlyContinue'; & {{ {} }}", command),
+        ])
         .status()?;
 
-    #[cfg(not(target_os = "windows"))] // ← 同时覆盖 macOS 和 Linux
+    #[cfg(not(target_os = "windows"))]
     let status = std::process::Command::new("sh")
         .arg("-c")
-        .arg(&command)
+        .arg(&format!("{} 2>/dev/null", command))
         .status()?;
 
-    println!("Command exited with status: {}", status);
+    if status.success() {
+        println!("\n✅ executed successfully");
+    } else {
+        println!("\n❌ execution failed (exit code: {})", status.code().unwrap_or(-1));
+    }
     Ok(())
 }
