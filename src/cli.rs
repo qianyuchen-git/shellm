@@ -10,7 +10,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Ask AI a natural language question and get a shell command as answer
+    /// Execute a shell command based on a natural language query
     Execute {
         /// natural language query, e.g. "find all .rs files modified in the last 7 days"
         query: String,
@@ -22,17 +22,13 @@ pub enum Commands {
         command: String,
     },
 
-    /// let AI review your shell script and provide feedback
-    Review {
-        /// file path
-        path: String,
-    },
-
     /// manage configuration (API key, model, etc.)
     Config {
         #[command(subcommand)]
         action: ConfigAction,
     },
+
+    Shell
 }
 
 #[derive(Subcommand, Debug)]
