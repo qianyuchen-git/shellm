@@ -1,10 +1,11 @@
-mod ai;
 mod cli;
 mod commands;
+mod ai;
 mod config;
-mod error;
 mod output;
-
+mod error;
+mod safety;
+mod session;
 use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Commands};
@@ -16,18 +17,19 @@ async fn main() -> Result<()> {
     // 加载配置（API key 等）
     let cfg = config::load_config()?;
 
+
     match cli.command {
         Commands::Execute { query } => {
-            commands::execute::run(&cfg, &query).await?;
+            commands::execute::run(&cfg, &query, None).await?;
         }
         Commands::Explain { command } => {
             commands::explain::run(&cfg, &command).await?;
         }
-        Commands::Review { path } => {
-            commands::review::run(&cfg, &path).await?;
-        }
         Commands::Config { action } => {
             commands::config::run(&action)?;
+        }
+        Commands::Shell => {
+            commands::shell::run(&cfg).await?;
         }
     }
 
