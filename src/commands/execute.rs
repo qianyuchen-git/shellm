@@ -104,18 +104,21 @@ pub async fn run(cfg: &AppConfig, query: &str, mut session: Option<&mut Session>
 
     // 6. 通过安全审查后执行命令
     #[cfg(target_os = "windows")]
-    let output = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            &format!(
-                "$OutputEncoding = [System.Text.Encoding]::UTF8; \
-                 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-                 $ErrorActionPreference='SilentlyContinue'; & {{ {} }}",
-                command
-            ),
-        ])
-        .output()?;
+    let mut command_builder = std::process::Command::new("powershell");
+    command_builder.args([
+        "-NoProfile",
+        "-Command",
+        &format!(
+            "$OutputEncoding = [System.Text.Encoding]::UTF8; \
+             [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+             $ErrorActionPreference='SilentlyContinue'; & {{ {} }}",
+            command
+        ),
+    ]);
+    if let Some(s) = session.as_deref_mut() {
+        command_builder.current_dir(s.current_dir());
+    }
+    let output = command_builder.output()?;
 
     #[cfg(not(target_os = "windows"))]
     let output = std::process::Command::new("sh")
@@ -193,18 +196,21 @@ pub fn run_raw(cmd: &str, mut session: Option<&mut Session>) -> Result<()> {
         }
     }
     #[cfg(target_os = "windows")]
-    let output = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            &format!(
-                "$OutputEncoding = [System.Text.Encoding]::UTF8; \
-                 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-                 $ErrorActionPreference='SilentlyContinue'; & {{ {} }}",
-                cmd
-            ),
-        ])
-        .output()?;
+    let mut command_builder = std::process::Command::new("powershell");
+    command_builder.args([
+        "-NoProfile",
+        "-Command",
+        &format!(
+            "$OutputEncoding = [System.Text.Encoding]::UTF8; \
+             [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+             $ErrorActionPreference='SilentlyContinue'; & {{ {} }}",
+            cmd
+        ),
+    ]);
+    if let Some(s) = session.as_deref_mut() {
+        command_builder.current_dir(s.current_dir());
+    }
+    let output = command_builder.output()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
