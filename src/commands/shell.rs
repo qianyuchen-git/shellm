@@ -11,7 +11,7 @@ pub async fn run(cfg: &AppConfig) -> Result<()> {
     let mut rl = rustyline::Editor::<(), DefaultHistory>::new()?;
     let mut session = crate::session::context::Session::new(20);
     loop {
-        let readline = rl.readline("shellm> ");
+        let readline = rl.readline(&format!("shellm:{}> ", session.current_dir().display()));
         match readline {
             Ok(line) => {
                 let cmd = line.trim();
@@ -32,6 +32,20 @@ pub async fn run(cfg: &AppConfig) -> Result<()> {
                 if cmd.starts_with('!') {
                     let raw_cmd = cmd.trim_start_matches("!");
                     execute::run_raw(raw_cmd, Some(&mut session))?;
+                    continue;
+                }
+                if cmd.starts_with("cd") {
+                    let parts: Vec<_> = cmd.splitn(2, ' ').collect();
+                    if parts.len() < 2 {
+                        println!("❓ 用法: cd <目录路径>");
+                        continue;
+                    }
+                    let target = session.current_dir().join(parts[1].trim());
+                    match std::fs::canonicalize(&target) {
+                        Ok(p) if p.is_dir() => session.change_dir(p),
+                        Ok(p) => println!("❌ 不是目录: {}", p.display()),
+                        Err(e) => println!("❌ 无法进入 {}: {}", target.display(), e),
+                    }
                     continue;
                 }
                 execute::run(cfg, cmd, Some(&mut session)).await?;
