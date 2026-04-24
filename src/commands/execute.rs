@@ -9,12 +9,8 @@ pub async fn run(cfg: &AppConfig, query: &str, mut session: Option<&mut Session>
     // 1. AI 生成命令
     let system_prompt = crate::ai::prompt::execute_system_prompt();
     let command = if let Some(session) = session.as_deref_mut() {
-        if session.get_messages().is_empty() {
-            session.add_message(crate::ai::client::Message::system(system_prompt));
-        }
-        // 无论是否首轮，都要把本轮 user query 加入 session
         session.add_message(crate::ai::client::Message::user(query.to_string()));
-        let cmd = crate::ai::client::chat(cfg, session.get_messages()).await?;
+        let cmd = crate::ai::client::chat(cfg, &session.get_messages()).await?;
         session.add_message(crate::ai::client::Message::assistant(cmd.clone()));
         cmd
     } else {
