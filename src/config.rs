@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
+use crate::error::ConfigError;
 
 /// app config struct
 #[derive(Debug, Serialize, Deserialize)]
@@ -13,6 +14,8 @@ pub struct AppConfig {
     pub model: Option<String>,
     /// language
     pub language: Option<String>,
+    /// whether to use history
+    pub use_history: Option<bool>,
 
 }
 
@@ -23,20 +26,21 @@ impl Default for AppConfig {
             api_base: Some("https://api.openai.com".to_string()),
             model: Some("gpt-3.5-turbo".to_string()),
             language: Some("zh-CN".to_string()),
+            use_history: Some(true),
         }
     }
     
 }
 
 /// get config file path
-pub fn config_path() -> Result<PathBuf> {
+pub fn config_path() -> Result<PathBuf, ConfigError> {
     let dirs = directories::ProjectDirs::from("com", "shellm", "shellm")
-        .ok_or_else(|| anyhow::anyhow!("Unable to determine config directory"))?;
+        .ok_or(ConfigError::NotFound)?;
     Ok(dirs.config_dir().join("config.json"))
 }
 
 /// load config from file, if not exist return default config
-pub fn load_config() -> Result<AppConfig> {
+pub fn load_config() -> Result<AppConfig, ConfigError> {
     let path = config_path()?;
     if !path.exists() {
         return Ok(AppConfig::default());
@@ -47,7 +51,7 @@ pub fn load_config() -> Result<AppConfig> {
 }
 
 /// save config to file
-pub fn save_config(cfg: &AppConfig) -> Result<()> {
+pub fn save_config(cfg: &AppConfig) -> Result<(), ConfigError> {
     let path = config_path()?;
     let json = serde_json::to_string_pretty(cfg)?;
     if let Some(parent) = path.parent() {
