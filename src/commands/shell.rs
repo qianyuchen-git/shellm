@@ -1,7 +1,9 @@
 use crate::ai::client::Role;
+use crate::ai::prompt;
 use crate::commands::execute;
 use crate::config::AppConfig;
 use crate::session;
+use crate::session::context::Session;
 use anyhow::Result;
 use rustyline::history::DefaultHistory;
 
@@ -9,7 +11,7 @@ use rustyline::history::DefaultHistory;
 pub async fn run(cfg: &AppConfig) -> Result<()> {
     println!("进入交互式 Shell 模式，输入 `exit` 退出。");
     let mut rl = rustyline::Editor::<(), DefaultHistory>::new()?;
-    let mut session = crate::session::context::Session::new(20);
+    let mut session = Session::new(20, prompt::execute_system_prompt());
     loop {
         let readline = rl.readline(&format!("shellm:{}> ", session.current_dir().display()));
         match readline {
@@ -23,32 +25,17 @@ pub async fn run(cfg: &AppConfig) -> Result<()> {
                     break;
                 }
                 rl.add_history_entry(cmd)?;
-                if cmd.starts_with("/") {
-                    // 内置命令
-                    let builtin_cmd = cmd.trim_start_matches("/");
-                    handle_builtin(builtin_cmd, &mut session);
-                    continue;
+                if let Some(builtin) = cmd.strip_prefix('/') {
+                    handle_builtin(builtin, &mut session);
+                } else if let Some(raw) = cmd.strip_prefix('!') {
+                     execute::run_raw(raw, Some(&mut session))?;
+                } else if let Some(arg) = cmd.strip_prefix("cd ") {
+                    handle_cd(arg, &mut session);
+                } else if cmd == "cd" {
+                    println!("❓ 用法: cd <目录路径>");
+                } else {
+                    execute::run(cfg, cmd, Some(&mut session)).await?;
                 }
-                if cmd.starts_with('!') {
-                    let raw_cmd = cmd.trim_start_matches("!");
-                    execute::run_raw(raw_cmd, Some(&mut session))?;
-                    continue;
-                }
-                if cmd.starts_with("cd") {
-                    let parts: Vec<_> = cmd.splitn(2, ' ').collect();
-                    if parts.len() < 2 {
-                        println!("❓ 用法: cd <目录路径>");
-                        continue;
-                    }
-                    let target = session.current_dir().join(parts[1].trim());
-                    match std::fs::canonicalize(&target) {
-                        Ok(p) if p.is_dir() => session.change_dir(p),
-                        Ok(p) => println!("❌ 不是目录: {}", p.display()),
-                        Err(e) => println!("❌ 无法进入 {}: {}", target.display(), e),
-                    }
-                    continue;
-                }
-                execute::run(cfg, cmd, Some(&mut session)).await?;
             }
             Err(rustyline::error::ReadlineError::Interrupted) => {
                 // Ctrl+C：取消当前输入，继续循环
@@ -69,7 +56,7 @@ pub async fn run(cfg: &AppConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_builtin(cmd: &str, session: &mut session::context::Session) {
+fn handle_builtin(cmd: &str, session: &mut Session) {
     match cmd {
         "history" => {
             let messages = session.get_messages();
@@ -99,5 +86,15 @@ pub fn handle_builtin(cmd: &str, session: &mut session::context::Session) {
         _ => {
             println!("❓ 未知命令: /{}，输入 /help 查看可用命令。", cmd);
         }
+    }
+}
+
+fn handle_cd(arg: &str, session: &mut Session) {
+    // join 的奇妙特性：如果 arg 是绝对路径，会直接替换；相对路径则拼接
+    let target = session.current_dir().join(arg.trim());
+    match std::fs::canonicalize(&target) {
+        Ok(p) if p.is_dir() => session.change_dir(p),
+        Ok(p) => println!("❌ 不是目录: {}", p.display()),
+        Err(e) => println!("❌ 无法进入 {}: {}", target.display(), e),
     }
 }
