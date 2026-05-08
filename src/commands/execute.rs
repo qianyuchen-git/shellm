@@ -5,10 +5,44 @@ use crate::safety::rules::{RiskLevel, RuleEngine};
 use crate::session::context::Session;
 use anyhow::Result;
 
+/// 从 AI 原始回复中提取可执行的 shell 命令。
+/// 考虑到弱模型偏常输出 markdown / 说明文字，这里做三层兑底：
+/// 1) 如果被包在 ``` 代码块里，取代码块内容（跳过可能的语言标识行）
+/// 2) 取第一个非空、非注释行，防止 AI 在命令后面加一大段说明
+/// 3) 去掉行首可能的 shell prompt（`$ ` / `> `）
+fn extract_command(raw: &str) -> String {
+    let s = raw.trim();
+
+    // 1) 剥离 markdown 代码块
+    let body: &str = if let Some(rest) = s.strip_prefix("```") {
+        if let Some(end) = rest.find("```") {
+            &rest[..end]
+        } else {
+            rest
+        }
+    } else {
+        s
+    };
+
+    // 2) 取第一个非空、非注释行
+    let line = body
+        .lines()
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty() && !l.starts_with('#'))
+        .unwrap_or("")
+        .to_string();
+
+    // 3) 去掉可能的 shell prompt 前缀
+    line.trim_start_matches("$ ")
+        .trim_start_matches("> ")
+        .trim()
+        .to_string()
+}
+
 pub async fn run(cfg: &AppConfig, query: &str, mut session: Option<&mut Session>) -> Result<()> {
     // 1. AI 生成命令
     let system_prompt = crate::ai::prompt::execute_system_prompt();
-    let command = if let Some(session) = session.as_deref_mut() {
+    let raw_command = if let Some(session) = session.as_deref_mut() {
         session.add_message(crate::ai::client::Message::user(query.to_string()));
         let cmd = crate::ai::client::chat(cfg, &session.get_messages()).await?;
         session.add_message(crate::ai::client::Message::assistant(cmd.clone()));
@@ -20,6 +54,11 @@ pub async fn run(cfg: &AppConfig, query: &str, mut session: Option<&mut Session>
         ];
         crate::ai::client::chat(cfg, &messages).await?
     };
+    let command = extract_command(&raw_command);
+    if command.is_empty() {
+        eprintln!("❌ AI 返回为空或未能提取出命令。原始回复:\n{}", raw_command);
+        return Ok(());
+    }
     println!("📋 生成命令: {}\n", command);
 
     // 2. 本地规则引擎快速评估
@@ -28,23 +67,10 @@ pub async fn run(cfg: &AppConfig, query: &str, mut session: Option<&mut Session>
 
     // 显示本地规则匹配结果
     if !rule_matches.is_empty() {
-        let summary: String = rule_matches
-            .iter()
-            .map(|m| format!("- {} [{}] {}", m.level, m.rule_name, m.reason))
-            .collect::<Vec<_>>()
-            .join("\n");
-
         for m in &rule_matches {
             println!("  {} [{}] {}", m.level, m.rule_name, m.reason);
         }
         println!();
-
-        if let Some(s) = session.as_deref_mut() {
-            s.add_message(crate::ai::client::Message::user(format!(
-                "本地规则扫描结果:\n{}",
-                summary
-            )));
-        }
     }
 
     // 3. 中风险及以上触发 AI 深度审查
@@ -54,12 +80,6 @@ pub async fn run(cfg: &AppConfig, query: &str, mut session: Option<&mut Session>
             Ok(result) => Some(result),
             Err(e) => {
                 eprintln!("  ⚠️  AI 安全审查失败，将仅依据本地规则: {}", e);
-                if let Some(session) = session.as_deref_mut() {
-                    session.add_message(crate::ai::client::Message::user(format!(
-                        "AI 安全审查失败: {}",
-                        e
-                    )));
-                }
                 None
             }
         }
@@ -80,20 +100,10 @@ pub async fn run(cfg: &AppConfig, query: &str, mut session: Option<&mut Session>
     match confirm::confirm(&command, final_level, ai_result.as_ref()) {
         confirm::ConfirmResult::Approved => {}
         confirm::ConfirmResult::Rejected => {
-            if let Some(s) = session.as_deref_mut() {
-                s.add_message(crate::ai::client::Message::user(
-                    "用户拒绝执行该命令".to_string(),
-                ));
-            }
             println!("  操作已取消。");
             return Ok(());
         }
         confirm::ConfirmResult::Blocked => {
-            if let Some(s) = session.as_deref_mut() {
-                s.add_message(crate::ai::client::Message::user(
-                    "该命令被安全策略阻断".to_string(),
-                ));
-            }
             return Ok(());
         }
     }
@@ -107,7 +117,7 @@ pub async fn run(cfg: &AppConfig, query: &str, mut session: Option<&mut Session>
         &format!(
             "$OutputEncoding = [System.Text.Encoding]::UTF8; \
              [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-             $ErrorActionPreference='SilentlyContinue'; & {{ {} }}",
+             $ErrorActionPreference='Continue'; & {{ {} }}; exit $LASTEXITCODE",
             command
         ),
     ]);
@@ -122,74 +132,25 @@ pub async fn run(cfg: &AppConfig, query: &str, mut session: Option<&mut Session>
         .arg(&command)
         .output()?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    if !stdout.trim().is_empty() {
-        println!("\n📊 命令输出：\n{}", stdout);
-    }
-    if !stderr.trim().is_empty() {
-        println!("\n⚠️ 命令错误输出：\n{}", stderr);
-    }
-
-    // 摘要：stdout + stderr 各取前 30 行存入 session
-    let stderr_summary: String = stderr.lines().take(20).collect::<Vec<_>>().join("\n");
-    let stdout_summary: String = stdout.lines().take(30).collect::<Vec<_>>().join("\n");
-
     if output.status.success() {
-        if let Some(session) = session.as_deref_mut() {
-            session.add_message(crate::ai::client::Message::user(format!(
-                "命令执行成功，输出摘要：\n{}",
-                if stdout_summary.is_empty() {
-                    "(无输出)"
-                } else {
-                    &stdout_summary
-                }
-            )));
-        }
         println!("\n✅ 执行成功");
     } else {
         let exit_code = output.status.code().unwrap_or(-1);
-        let session_msg = format!(
-            "命令执行失败 (exit code: {})\n错误输出摘要：\n{}",
-            exit_code,
-            if stderr_summary.is_empty() {
-                "(无错误输出)"
-            } else {
-                &stderr_summary
-            }
-        );
-        if let Some(session) = session.as_deref_mut() {
-            session.add_message(crate::ai::client::Message::user(session_msg));
-        }
         println!("\n❌ 执行失败 (exit code: {})", exit_code);
     }
     Ok(())
 }
 
-pub fn run_raw(cmd: &str, mut session: Option<&mut Session>) -> Result<()> {
+pub fn run_raw(cmd: &str, mut session: Option<&mut Session>) {
     let engine = RuleEngine::new();
-    let (rule_level, rule_matches) = engine.evaluate_chain(&cmd);
+    let (_rule_level, rule_matches) = engine.evaluate_chain(&cmd);
 
     // 显示本地规则匹配结果
     if !rule_matches.is_empty() {
-        let summary: String = rule_matches
-            .iter()
-            .map(|m| format!("- {} [{}] {}", m.level, m.rule_name, m.reason))
-            .collect::<Vec<_>>()
-            .join("\n");
-
         for m in &rule_matches {
             println!("  {} [{}] {}", m.level, m.rule_name, m.reason);
         }
         println!();
-
-        if let Some(s) = session.as_deref_mut() {
-            s.add_message(crate::ai::client::Message::user(format!(
-                "本地规则扫描结果:\n{}",
-                summary
-            )));
-        }
     }
     #[cfg(target_os = "windows")]
     let mut command_builder = std::process::Command::new("powershell");
@@ -199,54 +160,24 @@ pub fn run_raw(cmd: &str, mut session: Option<&mut Session>) -> Result<()> {
         &format!(
             "$OutputEncoding = [System.Text.Encoding]::UTF8; \
              [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-             $ErrorActionPreference='SilentlyContinue'; & {{ {} }}",
+             $ErrorActionPreference='Continue'; & {{ {} }}; exit $LASTEXITCODE",
             cmd
         ),
     ]);
     if let Some(s) = session.as_deref_mut() {
         command_builder.current_dir(s.current_dir());
     }
-    let output = command_builder.output()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    if !stdout.trim().is_empty() {
-        println!("\n📊 命令输出：\n{}", stdout);
-    }
-    if !stderr.trim().is_empty() {
-        println!("\n⚠️ 命令错误输出：\n{}", stderr);
-    }
-
-    // 摘要：stdout + stderr 各取前 30 行存入 session
-    let stderr_summary: String = stderr.lines().take(20).collect::<Vec<_>>().join("\n");
-    let stdout_summary: String = stdout.lines().take(30).collect::<Vec<_>>().join("\n");
-    if output.status.success() {
-        if let Some(session) = session.as_deref_mut() {
-            session.add_message(crate::ai::client::Message::user(format!(
-                "命令执行成功，输出摘要：\n{}",
-                if stdout_summary.is_empty() {
-                    "(无输出)"
-                } else {
-                    &stdout_summary
-                }
-            )));
+    let output = match command_builder.output() {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("❌ 无法启动命令 `{}`: {}", cmd, e);
+            return;
         }
+    };
+    if output.status.success() {
         println!("\n✅ 执行成功");
     } else {
         let exit_code = output.status.code().unwrap_or(-1);
-        let session_msg = format!(
-            "命令执行失败 (exit code: {})\n错误输出摘要：\n{}",
-            exit_code,
-            if stderr_summary.is_empty() {
-                "(无错误输出)"
-            } else {
-                &stderr_summary
-            }
-        );
-        if let Some(session) = session.as_deref_mut() {
-            session.add_message(crate::ai::client::Message::user(session_msg));
-        }
         println!("\n❌ 执行失败 (exit code: {})", exit_code);
     }
-    Ok(())
 }
